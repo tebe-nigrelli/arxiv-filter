@@ -21,35 +21,39 @@ func main() {
 
 	fmt.Println("\n\nFeed Description:")
 	fmt.Printf("Feed Title: %s\n", feed.Title)
-	fmt.Printf("Feed Updated: %s\n", feed.Updated)
 
-	fmt.Println("\n\nFeed Items:")
+	sources, err := downloadTopResults(feed.Items)
+	if err != nil {
+		fmt.Println("Error downloading top results:", err)
+		return
+	}
 
-	for _, value := range feed.Items[0:5] {
-		n := 100 // You can set n to any value you prefer
-		fmt.Printf("Title: %s\n", value.Title[:min(len(value.Title), n)])
-		fmt.Printf("Description: %s\n", value.Description[:min(len(value.Description), n)])
-		fmt.Printf("Link: %s\n", value.Link[:min(len(value.Link), n)])
-		fmt.Printf("Links: %v\n", value.Links)
-		fmt.Printf("Updated: %s\n", value.Updated[:min(len(value.Updated), n)])
-		fmt.Printf("UpdatedParsed: %v\n", value.UpdatedParsed)
-		fmt.Printf("Published: %s\n", value.Published[:min(len(value.Published), n)])
-		fmt.Printf("PublishedParsed: %v\n", value.PublishedParsed)
-		if value.Author != nil {
-			fmt.Printf("Author: %s\n", value.Author.Name[:min(len(value.Author.Name), n)])
-		}
-		fmt.Printf("Authors: %v\n", value.Authors)
-		fmt.Printf("GUID: %s\n", value.GUID[:min(len(value.GUID), n)])
-		if value.Image != nil {
-			fmt.Printf("Image: %s\n", value.Image.URL[:min(len(value.Image.URL), n)])
-		}
-		fmt.Printf("Categories: %v\n", value.Categories)
-		fmt.Printf("Extensions: %v\n", value.Extensions)
-		for key, val := range value.Custom {
-			fmt.Printf("Custom[%s]: %s\n", key, val[:min(len(val), n)])
-		}
+	for _, source := range sources {
+		fmt.Println("Source Link:", source.SrcLink)
 	}
 
 	fmt.Println("\n\n ")
 
+}
+
+type Source struct {
+	Link    string
+	SrcLink string
+}
+
+func downloadTopResults(list []*gofeed.Item) ([]Source, error) {
+	n := len(list)
+	srcLinks := make([]Source, 0, n)
+	for _, value := range list[0:min(len(list), n)] {
+		srcString := value.GUID[:17] + "src" + value.GUID[20:]
+		srcLinks = append(srcLinks, Source{Link: value.Link, SrcLink: srcString})
+	}
+	return srcLinks, nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
