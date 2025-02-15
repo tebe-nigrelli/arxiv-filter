@@ -17,17 +17,18 @@ const (
 )
 
 func main() {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
 
-	fp := gofeed.NewParser()
-	feed, err := fp.ParseURLWithContext("http://export.arxiv.org/api/query?search_query=all:marc+mezard", ctx)
+	start := time.Now()
+	feed, err := ContextQuery("http://export.arxiv.org/api/query?search_query=all:marc+mezard", 3)
 	if err != nil {
 		fmt.Println("Error parsing feed:", err)
 		return
 	}
+	elapsed := time.Since(start)
+	fmt.Printf("ContextQuery took %s\n\n", elapsed)
 
-	fmt.Println("\n\nFeed Description:")
+	// Feed
+	start = time.Now()
 	fmt.Printf("Feed Title: %s\n", feed.Title)
 
 	sources, err := ResultToSources(feed.Items)
@@ -35,7 +36,10 @@ func main() {
 		fmt.Println("Error downloading top results:", err)
 		return
 	}
+	elapsed = time.Since(start)
+	fmt.Printf("Construct sources took: %s\n\n", elapsed)
 
+	// Download
 	downloadContext, cancelDownloadContext := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelDownloadContext()
 
@@ -44,12 +48,28 @@ func main() {
 		DownloadSource(source, downloadContext)
 	}
 
+	elapsed = time.Since(start)
+	fmt.Printf("Download took %s\n\n", elapsed)
+
 	for _, source := range sources {
 		UnpackSource(source)
 	}
 
-	fmt.Println("\n\n ")
+	elapsed = time.Since(start)
+	fmt.Printf("unpack took %s\n\n", elapsed)
 
+}
+
+// ContextQuery produces a context of length sec seconds and parses the URL result
+func ContextQuery(query string, sec int) (*gofeed.Feed, error) {
+	if sec <= 0 {
+		return nil, fmt.Errorf("timeout must be greater than zero")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(sec)*time.Second)
+	defer cancel()
+
+	return gofeed.NewParser().ParseURLWithContext(query, ctx)
 }
 
 type Source struct {
@@ -104,9 +124,9 @@ func UnpackSource(src Source) error {
 	}
 
 	cmd := exec.Command("tar", "-xvf", getDownloadDir(src), "-C", getUnpackDir(src))
-	err = cmd.Run()
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		fmt.Printf("Error unpacking source for %s: %v\n", src.Title, err)
+		fmt.Printf("Error unpacking source for %s: %v\nOutput: %s\n", src.Title, err, string(output))
 	}
 	return err
 }
