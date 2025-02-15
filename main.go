@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"mime"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -12,8 +14,8 @@ import (
 )
 
 const (
-	srcDir    = "sources"
-	unpackDir = "unpacked"
+	srcDir    = "sources/"
+	unpackDir = "unpacked/"
 )
 
 func main() {
@@ -40,12 +42,13 @@ func main() {
 	fmt.Printf("Construct sources took: %s\n\n", elapsed)
 
 	// Download
-	downloadContext, cancelDownloadContext := context.WithTimeout(context.Background(), 5*time.Second)
+	allottedTime := time.Duration(len(sources)) * time.Second
+	downloadContext, cancelDownloadContext := context.WithTimeout(context.Background(), allottedTime)
 	defer cancelDownloadContext()
 
-	for _, source := range sources {
-		fmt.Println("Source:", source.SrcLink)
-		DownloadSource(source, downloadContext)
+	for i := range sources {
+		sources[i].SrcFile = DownloadSource(sources[i], downloadContext)
+		fmt.Println("Saved: " + sources[i].SrcFile)
 	}
 
 	elapsed = time.Since(start)
@@ -79,6 +82,8 @@ type Source struct {
 	Link string
 	// link to the tex source file
 	SrcLink string
+	// filename of the downloaded package
+	SrcFile string
 	// GUID of the article
 	id string
 }
@@ -98,22 +103,50 @@ func ResultToSources(list []*gofeed.Item) ([]Source, error) {
 	return srcLinks, nil
 }
 
-func getDownloadDir(src Source) string {
-	return fmt.Sprintf("%s/%s", srcDir, src.id)
+func getDownloadPath(src Source) string {
+	return fmt.Sprintf("%s%s", srcDir, src.id)
 }
 
 func getUnpackDir(src Source) string {
-	return fmt.Sprintf("%s/%s/", unpackDir, src.id)
+	return fmt.Sprintf("%s%s/", unpackDir, src.id)
 }
 
 // DownloadSource downloads the source of the article
 // and saves it in the sources directory, under the name of the article
-func DownloadSource(src Source, ctx context.Context) {
-	cmd := exec.CommandContext(ctx, "curl", "-o", getDownloadDir(src), src.SrcLink)
-	err := cmd.Run()
+func DownloadSource(src Source, ctx context.Context) string {
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	downloadPath := getDownloadPath(src)
+
+	req, _ := http.NewRequestWithContext(ctx, "HEAD", src.SrcLink, nil)
+	resp, err := client.Do(req)
+	if err == nil {
+		defer resp.Body.Close()
+		if ct := resp.Header.Get("Content-Type"); ct != "" {
+			exts, _ := mime.ExtensionsByType(ct)
+			if len(exts) > 0 {
+				cmd := exec.CommandContext(ctx, "curl", "-o", downloadPath+exts[0], src.SrcLink)
+				err = cmd.Run()
+				if err != nil {
+					fmt.Printf("Error downloading source for %s: %v\n", src.Title, err)
+				}
+				return src.id + exts[0]
+			}
+		}
+	}
+
+	// Fallback to original behavior if extension detection fails
+	cmd := exec.CommandContext(ctx, "curl", "-o", downloadPath, src.SrcLink)
+	err = cmd.Run()
 	if err != nil {
 		fmt.Printf("Error downloading source for %s: %v\n", src.Title, err)
+		return ""
 	}
+	return downloadPath
 }
 
 func UnpackSource(src Source) error {
@@ -122,11 +155,10 @@ func UnpackSource(src Source) error {
 		fmt.Printf("Error creating unpack directory for %s: %v\n", src.Title, err)
 		return err
 	}
-
-	cmd := exec.Command("tar", "-xvf", getDownloadDir(src), "-C", getUnpackDir(src))
+	cmd := exec.Command("tar", "-xvf", srcDir+src.SrcFile, "-C", getUnpackDir(src))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		fmt.Printf("Error unpacking source for %s: %v\nOutput: %s\n", src.Title, err, string(output))
+		fmt.Printf("Error unpacking source %s: \nOutput: %s\n", src.id, string(output))
 	}
 	return err
 }
