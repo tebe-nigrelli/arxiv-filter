@@ -6,5 +6,6 @@ import (
 
 func main() {
 	dw.DownloadUnpack("http://export.arxiv.org/api/query?search_query=all:Marc+Mezard")
-	dw.FilterTex()
+	// only keep these extensions
+	dw.FilterTex([]string{".tex", ".bib"})
 }
